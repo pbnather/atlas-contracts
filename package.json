@@ -1,0 +1,27 @@
+{
+  "name": "hello-world",
+  "version": "1.0.0",
+  "author": "Roetm",
+  "license": "MIT",
+  "dependencies": {
+    "@defi.org/web3-candies": "^2.7.0",
+    "@openzeppelin/contracts-upgradeable": "^4.4.2",
+    "ts-node": "^10.2.0"
+  },
+  "devDependencies": {
+    "ethereumjs-hooks": "git+https://github.com/defi-org-code/ethereumjs-hooks.git",
+    "hardhat-contract-sizer": "^2.1.1"
+  },
+  "scripts": {
+    "postinstall": "ethereumjs-hooks",
+    "typechain": "typechain --target=web3-v1 --out-dir=typechain-abi 'abi/**/*.json' && npx hardhat typechain",
+    "prebuild": "rm -rf artifacts && rm -rf typechain-hardhat && rm -rf typechain-abi && npm run typechain",
+    "build": "npx hardhat compile && npx solhint 'contracts/**/*.sol'",
+    "quicktest": "npx hardhat test --logs",
+    "test": "npm run build && npx hardhat test --logs",
+    "deploy": "npx hardhat deploy --network $1"
+  },
+  "prettier": {
+    "printWidth": 120
+  }
+}
