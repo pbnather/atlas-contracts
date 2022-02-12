@@ -63,6 +63,15 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
     /// @notice Percent of rewards that go to aMagicStaking (MasterChef) (1%=100).
     uint256 public miningPercent;
 
+    /// @notice Current lock time
+    IAtlasMine.Lock public lock;
+
+    /// @notice Deposited MAGIC, not yet staked in Atlas Mine
+    uint256 public idleMagic;
+
+    /// @notice Threshold of deposited MAGIC to be staked in Atlas Mine.
+    uint256 public depositThreshold;
+
     /**
      *  @notice Info of each staked NFT.
      */
@@ -82,10 +91,13 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
     event MiningPercentChanged(uint256 indexed oldPercent, uint256 indexed newPercent);
     event RewardsHarvested(uint256 rewards, uint256 toStaking, uint256 toSplitter);
     event Deposit(address indexed user, uint256 amount);
+    event StakedMagic(uint256 amount, IAtlasMine.Lock indexed lock);
     event StakedTreasure(address indexed owner, uint256 indexed tokenId);
     event UnstakedTreasure(address indexed owner, uint256 indexed tokenId);
     event StakedLegion(address indexed owner, uint256 indexed tokenId);
     event UnstakedLegion(address indexed owner, uint256 indexed tokenId);
+    event LockTimeChanged(IAtlasMine.Lock oldLock, IAtlasMine.Lock newLock);
+    event DepositThresholdChanged(uint256 oldThreshold, uint256 newThreshold);
 
     function initialize(
         address _weth,
@@ -95,7 +107,9 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
         address _aMagicStaking,
         address _treasury,
         address _rewardSplitter,
-        uint256 _miningPercent
+        uint256 _miningPercent,
+        uint256 _depositThreshold,
+        IAtlasMine.Lock _lock
     ) external initializer {
         require(_weth != address(0), "Canot set address zero");
         weth = IERC20(_weth);
@@ -113,6 +127,9 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
         rewardSplitter = _rewardSplitter;
         require(_miningPercent <= 10_000, "Value greater than 1000, 100%");
         miningPercent = _miningPercent;
+        lock = _lock;
+        idleMagic = 0;
+        depositThreshold = _depositThreshold;
         // Get Legion and Treasure addresses
         treasure = atlasMine.treasure();
         legion = atlasMine.legion();
@@ -122,7 +139,7 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
     }
 
     /**
-     *  @notice Sets new address for `rewardSplitter`.
+     *  @notice Set new address for `rewardSplitter`.
      *  @param _rewardSplitter Address of the new splitter.
      */
     function setRewardSplitter(address _rewardSplitter) external onlyOwner {
@@ -133,7 +150,7 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
     }
 
     /**
-     *  @notice Sets new `miningPercent`, how much % of rewards will get distributed to stakers.
+     *  @notice Set new `miningPercent`, how much % of rewards will get distributed to stakers.
      *  @dev How much % of rewards will get sent to MasterChef (`aMagicStaking`).
      *  @param _miningPercent Mining percent, max 100% (10000).
      */
@@ -145,19 +162,66 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
     }
 
     /**
-     *  @notice Deposits MAGIC to Atlas Mine, mints aMAGIC 1:1 for MAGIC deposited.
+     *  @notice Set new `lock`, time for which to stake/restake magic in Atlas Mine.
+     *  @param _lock New locktime period.
+     */
+    function changeLockTime(IAtlasMine.Lock _lock) external onlyOwner {
+        IAtlasMine.Lock old = lock;
+        lock = _lock;
+        emit LockTimeChanged(old, _lock);
+    }
+
+    /**
+     *  @notice Set new `depositThreshold`, minimum MAGIC to be staked in Atlas Mine.
+     *  @param _depositThreshold New deposit threshold.
+     */
+    function changeDepositThreshold(uint256 _depositThreshold) external onlyOwner {
+        uint256 old = depositThreshold;
+        depositThreshold = _depositThreshold;
+        emit DepositThresholdChanged(old, _depositThreshold);
+    }
+
+    /**
+     *  @notice Withdraw deposits and restake them in the Atlas Mine.
+     *  @param _depositIds List of deposits to withdraw and restake.
+     */
+    function restakeMagic(uint256[] memory _depositIds) external {
+        require(msg.sender == treasury, "Only treasury allowed");
+        for (uint256 i = 0; i < _depositIds.length; i++) {
+            atlasMine.withdrawPosition(_depositIds[i], type(uint256).max);
+        }
+        uint256 magicBalance = magic.balanceOf(msg.sender);
+        magic.approve(address(atlasMine), magicBalance);
+        atlasMine.deposit(magicBalance, lock);
+        emit StakedMagic(magicBalance, lock);
+    }
+
+    /**
+     *  @notice Deposit MAGIC to Atlas Mine, mint aMAGIC 1:1 for MAGIC deposited.
      *  @param _amount Amount of MAGIC to convert to aMAGIC.
      */
     function deposit(uint256 _amount) external {
         require(_amount <= magic.balanceOf(msg.sender), "Not enough MAGIC");
-        magic.approve(address(atlasMine), _amount);
-        atlasMine.deposit(_amount, IAtlasMine.Lock.twelveMonths);
+        magic.safeTransferFrom(msg.sender, address(this), _amount);
+        uint256 magicToStake = _amount + idleMagic;
+        if (magicToStake >= depositThreshold) {
+            idleMagic = 0;
+            magic.approve(address(atlasMine), magicToStake);
+            atlasMine.deposit(magicToStake, lock);
+            emit StakedMagic(magicToStake, lock);
+        } else {
+            idleMagic = magicToStake;
+        }
         aMagic.mint(msg.sender, _amount);
         emit Deposit(msg.sender, _amount);
     }
 
     /**
      *  @notice Stake single Treasure NFT into the Community Mine to boost MAGIC rewards.
+     *  If all treasure slots are full, this function will replace Treasure with the lowest boost,
+     *  if it's lower than provided one, and send it back to the owner. If no such a treasure exists,
+     *  or existing one is controlled by `treasury`, contract execution will revert.
+
      *  @param _tokenId Id of the token in the Treasure NFT Collection.
      */
     function stakeSingleTreasure(uint256 _tokenId) external {
@@ -216,6 +280,10 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
 
     /**
      *  @notice Stake single Legion NFT into the Community Mine to boost MAGIC rewards.
+     *  If all legion slots are full, this function will replace Legion with the lowest boost,
+     *  if it's lower than provided one, and send it back to the owner. If no such a legion exists,
+     *  or existing one is controlled by `treasury`, contract execution will revert.
+     *
      *  @param _tokenId Id of the token in the Legion NFT Collection.
      */
     function stakeSingleLegion(uint256 _tokenId) external {
@@ -268,7 +336,7 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
     }
 
     /**
-     *  @notice Harvests rewards from Atlas Mine and sends:
+     *  @notice Harvest rewards from Atlas Mine and send:
      *   - `miningPercent` rewards to `aMagicStaking` contract.
      *   - (100% - `miningPercent`) rewards to `rewardSplitter` contract.
      *
@@ -277,12 +345,12 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
     function harvestRewards() external override returns (uint256 miningRewards, uint256 treasuryRewards) {
         require(msg.sender == aMagicStaking, "Only aMagicStaking allowed");
         atlasMine.harvestAll();
-        uint256 magicBalance = magic.balanceOf(address(this));
-        miningRewards = (magicBalance * miningPercent) / 10_000;
-        treasuryRewards = magicBalance - miningRewards;
+        uint256 harvestedMagic = magic.balanceOf(address(this)) - idleMagic;
+        miningRewards = (harvestedMagic * miningPercent) / 10_000;
+        treasuryRewards = harvestedMagic - miningRewards;
         magic.safeTransfer(aMagicStaking, miningRewards);
         magic.safeTransfer(rewardSplitter, treasuryRewards);
-        emit RewardsHarvested(magicBalance, miningRewards, treasuryRewards);
+        emit RewardsHarvested(harvestedMagic, miningRewards, treasuryRewards);
     }
 
     /**
