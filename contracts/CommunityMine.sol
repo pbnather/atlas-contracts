@@ -111,19 +111,19 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
         uint256 _depositThreshold,
         IAtlasMine.Lock _lock
     ) external initializer {
-        require(_weth != address(0), "Canot set address zero");
+        require(_weth != address(0), "Cannot set address zero");
         weth = IERC20(_weth);
-        require(_magic != address(0), "Canot set address zero");
+        require(_magic != address(0), "Cannot set address zero");
         magic = IERC20(_magic);
-        require(_aMagic != address(0), "Canot set address zero");
+        require(_aMagic != address(0), "Cannot set address zero");
         aMagic = IAMagic(_aMagic);
-        require(_atlasMine != address(0), "Canot set address zero");
+        require(_atlasMine != address(0), "Cannot set address zero");
         atlasMine = IAtlasMine(_atlasMine);
-        require(_aMagicStaking != address(0), "Canot set address zero");
+        require(_aMagicStaking != address(0), "Cannot set address zero");
         aMagicStaking = _aMagicStaking;
-        require(_treasury != address(0), "Canot set address zero");
+        require(_treasury != address(0), "Cannot set address zero");
         treasury = _treasury;
-        require(_rewardSplitter != address(0), "Canot set address zero");
+        require(_rewardSplitter != address(0), "Cannot set address zero");
         rewardSplitter = _rewardSplitter;
         require(_miningPercent <= 10_000, "Value greater than 1000, 100%");
         miningPercent = _miningPercent;
@@ -143,7 +143,7 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
      *  @param _rewardSplitter Address of the new splitter.
      */
     function setRewardSplitter(address _rewardSplitter) external onlyOwner {
-        require(_rewardSplitter != address(0), "Canot set address zero");
+        require(_rewardSplitter != address(0), "Cannot set address zero");
         address old = rewardSplitter;
         rewardSplitter = _rewardSplitter;
         emit RewardSplitterChanged(old, _rewardSplitter);
@@ -155,7 +155,7 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
      *  @param _miningPercent Mining percent, max 100% (10000).
      */
     function setMiningPercent(uint256 _miningPercent) external onlyOwner {
-        require(_miningPercent <= 10_000, "Value greater than 1000, 100%");
+        require(_miningPercent <= 10_000, "Value greater than 10000, 100%");
         uint256 old = miningPercent;
         miningPercent = _miningPercent;
         emit MiningPercentChanged(old, _miningPercent);
@@ -382,10 +382,11 @@ contract CommunityMine is Initializable, Ownable, ICommunityMine {
     }
 
     /**
-     *  @notice Allow anyone to send lost tokens to the owner.
+     *  @notice Allow anyone to send lost tokens to the owner, except MAGIC token.
      *  @return bool
      */
     function recoverLostToken(IERC20 _token) external returns (bool) {
+        require(address(_token) != address(magic), "Cannot recover MAGIC");
         uint256 balance = _token.balanceOf(address(this));
         _token.safeTransfer(owner(), balance);
         return true;

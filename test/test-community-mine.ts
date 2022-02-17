@@ -1,10 +1,11 @@
-import { aMagic, aMagicStaking, atlasMine, communityMine, magic, prepareForTests, splitter, timelock, treasury } from "./test-base";
+import { aMagic, aMagicStaking, atlasMine, communityMine, magic, prepareForTests, splitter, timelock, treasury, user1 } from "./test-base";
 import { expect } from "chai";
-import { block, bn, bn18, contract, contracts, erc20, erc20s, ether, maxUint256, web3, zero, zeroAddress } from "@defi.org/web3-candies";
+import { block, bn, bn18, contract, contracts, erc20, erc20s, ether, expectRevert, maxUint256, web3, zero, zeroAddress } from "@defi.org/web3-candies";
 import { TreasureMarketplace } from "../typechain-abi/treasureMarketplace";
-import { hre, impersonate, mineBlock, mineBlocks } from "@defi.org/web3-candies/dist/hardhat";
+import { deployArtifact, hre, impersonate, mineBlock, mineBlocks } from "@defi.org/web3-candies/dist/hardhat";
 import { AtlasMine } from "../typechain-abi/atlasMine";
 import { LegionERC721 } from "../typechain-abi/LegionERC721";
+import { CommunityMine } from "../typechain-hardhat/CommunityMine";
 
 describe("CommunityMine", () => {
     beforeEach(async () => {
@@ -12,11 +13,13 @@ describe("CommunityMine", () => {
     });
 
     it("should initialize properly", async () => {
-        const miningPercent = bn("900");
-        const depositThreshold = bn("100000");
+        const miningPercent = bn("9000");
+        const depositThreshold = bn("10000");
         const lock = bn("4");
 
-        await communityMine.methods.initialize(
+        const newCommunityMine = await deployArtifact<CommunityMine>("CommunityMine", { from: timelock }, []);
+
+        await newCommunityMine.methods.initialize(
             erc20s.arb.WETH().address,
             magic.options.address,
             aMagic.options.address,
@@ -42,7 +45,102 @@ describe("CommunityMine", () => {
         expect(await communityMine.methods.depositThreshold().call()).bignumber.equals(depositThreshold);
         expect(await communityMine.methods.lock().call()).bignumber.equals(lock);
         expect(await communityMine.methods.idleMagic().call()).bignumber.equals(zero);
-    })
+    });
+
+    it("can only be initialized once", async () => {
+        const miningPercent = bn("9000");
+        const depositThreshold = bn("10000");
+        const lock = bn("4");
+
+        expectRevert(async () => {
+            await communityMine.methods.initialize(
+                erc20s.arb.WETH().address,
+                magic.options.address,
+                aMagic.options.address,
+                atlasMine.options.address,
+                aMagicStaking.options.address,
+                treasury,
+                splitter,
+                miningPercent,
+                depositThreshold,
+                lock
+            ).send({ from: timelock });
+        }, "Initializable: contract is already initialized")
+    });
+
+    it("Splitter should be set properly", async () => {
+        expect(await communityMine.methods.rewardSplitter().call()).eq(splitter);
+        await communityMine.methods.setRewardSplitter(user1).send({ from: timelock });
+        expect(await communityMine.methods.rewardSplitter().call()).eq(user1);
+    });
+
+    it("Only owner can set splitter", async () => {
+        expectRevert(async () => {
+            await communityMine.methods.setRewardSplitter(splitter).send({ from: user1 });
+        }, "Ownable: caller is not the owner");
+    });
+
+    it("Splitter cannot be set to address zero", async () => {
+        expectRevert(async () => {
+            await communityMine.methods.setRewardSplitter(zeroAddress).send({ from: timelock });
+        }, "Cannot set address zero");
+    });
+
+    it("Mining percent should be set properly", async () => {
+        const miningPercent = bn("9000");
+        const newMiningPercent = bn("5000");
+        expect(await communityMine.methods.miningPercent().call()).bignumber.equals(miningPercent);
+        await communityMine.methods.setMiningPercent(newMiningPercent).send({ from: timelock });
+        expect(await communityMine.methods.miningPercent().call()).bignumber.equals(newMiningPercent);
+    });
+
+    it("Only owner can set mining percent", async () => {
+        expectRevert(async () => {
+            await communityMine.methods.setMiningPercent(bn("5000")).send({ from: user1 });
+        }, "Ownable: caller is not the owner");
+    });
+
+    it("Mining percent cannot be set over 100%", async () => {
+        expectRevert(async () => {
+            await communityMine.methods.setMiningPercent(bn("12000")).send({ from: timelock });
+        }, "Value greater than 10000, 100%");
+    });
+
+    it("Lock time should be set properly", async () => {
+        const lock = bn("4");
+        const newLock = bn("1");
+        expect(await communityMine.methods.lock().call()).bignumber.equals(lock);
+        await communityMine.methods.changeLockTime(newLock).send({ from: timelock });
+        expect(await communityMine.methods.lock().call()).bignumber.equals(newLock);
+    });
+
+    it("Only owner can set lock time", async () => {
+        expectRevert(async () => {
+            await communityMine.methods.setMiningPercent(bn("1")).send({ from: user1 });
+        }, "Ownable: caller is not the owner");
+    });
+
+    it("Lock time cannot be set to unexisting lock", async () => {
+        expectRevert(async () => {
+            await communityMine.methods.changeLockTime(bn("1337")).send({ from: timelock });
+        }, "value out-of-bounds");
+    });
+
+    it("Deposit threshold should be set properly", async () => {
+        const depositThreshold = bn("10000");
+        const newDepositThreshold = bn("5000");
+        expect(await communityMine.methods.depositThreshold().call()).bignumber.equals(depositThreshold);
+        await communityMine.methods.changeDepositThreshold(newDepositThreshold).send({ from: timelock });
+        expect(await communityMine.methods.depositThreshold().call()).bignumber.equals(newDepositThreshold);
+    });
+
+    it("Only owner can set deposit threshold", async () => {
+        expectRevert(async () => {
+            await communityMine.methods.changeDepositThreshold(bn("5000")).send({ from: user1 });
+        }, "Ownable: caller is not the owner");
+    });
+
+
 
     // it("test", async () => {
     //     const treasureMarketPlace = contract<TreasureMarketplace>(require("../abi/treasureMarketplace.json"), "0x2E3b85F85628301a0Bce300Dee3A6B04195A15Ee");
